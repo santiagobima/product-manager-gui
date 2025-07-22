@@ -68,9 +68,6 @@ class VentanaPrincipal:
         self.boton_editar = ttk.Button(text='EDITAR', command=self.edit_producto, style='my.TButton')
         self.boton_editar.grid(row=5, column=1, sticky=W + E)
 
-
-
-
         self.get_productos()
 
 
@@ -222,6 +219,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     app =  VentanaPrincipal(root)
     root.mainloop() #tiene q ser la última línea del programa
+    
 
 
 
