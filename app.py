@@ -6,15 +6,16 @@ from tkinter import StringVar
 from tkinter import Label,Entry,Button, Text, Scrollbar, Listbox, END, Toplevel
 from tkinter import W, E
 from tkinter import ttk
-import sqlite3
+
 import ttkbootstrap as ttk1
 from ttkbootstrap.constants import *
 from PIL import Image, ImageTk
-import query
+from database import Session
+from models import Producto
 
 
 class VentanaPrincipal:
-    db = "database/productos.db"
+
 
 
     def __init__(self,root):
@@ -131,33 +132,22 @@ class VentanaPrincipal:
         widget.bind("<Leave>", on_leave)
 
 
-    def db_consulta(self, consulta, parametros = ()):
-        with sqlite3.connect(self.db) as con :  #self.db es la base de datos
-            cursor = con.cursor()
-            resultado = cursor.execute(consulta,parametros)
-            con.commit()
-
-        return resultado.fetchall()
 
     def get_productos(self):
+
 
         #Limpiamos la tabla antes de mostrar los nuevos registros
         registros_tabla = self.tabla.get_children()
         for fila in registros_tabla:
             self.tabla.delete(fila)
 
-
-        query = "SELECT * FROM producto ORDER BY nombre DESC"
-        registros = self.db_consulta(query)
-        print(registros)
-        for registro in registros:
-            producto_id = registro[0]
-            nombre = registro[1]
-            precio = float(registro[2])
-            cantidad = int(registro[3])
-            precio_total = round(precio * cantidad, 2)
-            categoria = registro[4]
-            self.tabla.insert("", "end", text=nombre, values=(precio, cantidad, precio_total,categoria))
+        session = Session()
+        productos = session.query(Producto).order_by(Producto.nombre.desc()).all()
+        for producto in productos:
+            precio_total = round(producto.precio * producto.cantidad, 2)
+            self.tabla.insert("","end", text=producto.nombre, values=(producto.precio, producto.cantidad, precio_total, producto.categoria))
+        session.close()
+        # Consulta para obtener los productos ordenados por nombre de forma descendente
 
     def validacion_nombre(self):
         # Devuelve True si el campo nombre no está vacío
@@ -195,39 +185,52 @@ class VentanaPrincipal:
             self.mensaje['text'] = 'La cantidad es obligatoria y debe ser un número entero mayor o igual a 0.'
             return
 
-        # Guardar en base de datos
-        query = 'INSERT INTO producto VALUES(NULL, ?, ?, ?,?)'
-        parametros = (self.nombre.get(), self.precio.get(),self.cantidad.get(),self.categoria_var.get())
-        self.db_consulta(query, parametros)
-        print("Datos guardados")
-
+        session = Session()
+        nuevo_producto = Producto(
+            nombre = self.nombre.get(),
+            precio = float(self.precio.get()),
+            cantidad = int(self.cantidad.get()),
+            categoria = self.categoria_var.get()
+        )
+        session.add(nuevo_producto)
+        session.commit()
+        session.close()
         # Mensaje de éxito
         self.mensaje['text'] = f'Producto {self.nombre.get()} añadido con éxito.'
-
         # Limpiar campos del formulario
         self.nombre.delete(0, END)
         self.precio.delete(0, END)
         self.cantidad.delete(0, END)
-
         # Actualizar lista de productos
         self.get_productos()
 
     def del_producto(self):
-        self.mensaje['text'] = ''  # Mensaje inicialmente vacío , quiero que vacies el mensaje asi no hay nada.
+        self.mensaje['text'] = ''  # Limpiar mensaje antes de realizar la acción
 
-        # Comprobación de que se seleccione un producto para poder eliminarlo
         try:
-            self.tabla.item(self.tabla.selection())['text'][0] #text posicion 0 me devuelve el nombre.
-        except IndexError as e:
-            self.mensaje['text'] = 'Por favor, seleccione un producto'
+            seleccion = self.tabla.selection()
+            if not seleccion:
+                self.mensaje['text'] = 'Por favor, seleccione un producto para eliminar'
+                return
+
+            item = self.tabla.item(seleccion[0])
+            nombre = item['text']
+            session = Session ()
+            producto = session.query(Producto).filter_by(nombre=nombre).first()
+            if producto:
+                session.delete(producto)
+                session.commit()
+                self.mensaje['text'] = f'Producto {nombre} eliminado con éxito.'
+            else:
+                self.mensaje['text'] = f'Producto {nombre} no encontrado.'
+            session.close()
+            self.get_productos()
+        except Exception as e:
+            self.mensaje['text'] = f'Error al eliminar el producto: {str(e)}'
             return
 
-        self.mensaje['text'] = ''
-        nombre = self.tabla.item(self.tabla.selection())['text']
-        query = 'DELETE FROM producto WHERE nombre = ?'
-        self.db_consulta(query, (nombre,))
-        self.mensaje['text'] = f'Producto {nombre} eliminado con éxito'
-        self.get_productos()
+
+
 
     def edit_producto(self):
         try:
@@ -325,13 +328,20 @@ class VentanaEditarProducto:
         nuevo_cantidad = self.input_cantidad_nueva.get() or self.cantidad
         nueva_categoria = self.input_categoria_nueva.get() or self.categoria
 
-        if nuevo_nombre and nuevo_precio:
-            query = 'UPDATE producto SET nombre = ?, precio = ? , cantidad = ?, categoria = ? WHERE nombre = ?'
-            parametros = (nuevo_nombre, nuevo_precio,nuevo_cantidad, nueva_categoria, self.nombre)  # id_producto debe ser definido, por ejemplo, obteniendo el ID del producto seleccionado
-            self.ventana_principal.db_consulta(query, parametros)
+        session = Session()
+        producto = session.query(Producto).filter_by(nombre=self.nombre).first()
+
+        if producto:
+            producto.nombre = nuevo_nombre
+            producto.precio = float(nuevo_precio) if nuevo_precio else producto.precio
+            producto.cantidad = int(nuevo_cantidad) if nuevo_cantidad else producto.cantidad
+            producto.categoria = nueva_categoria if nueva_categoria else producto.categoria
+            session.commit()
+
             self.mensaje['text'] = f'El producto {self.nombre} ha sido actualizado con éxito'
         else:
-            self.mensaje['text'] = f'No se pudo actualizar el producto {self.nombre}'
+            self.mensaje['text'] = f'No se pudo actualizar el producto {self.nombre} para editarlo'
+        session.close()
 
         self.ventana_editar.destroy()
         self.ventana_principal.get_productos()
